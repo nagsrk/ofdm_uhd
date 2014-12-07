@@ -1,0 +1,139 @@
+#!/usr/bin/env python
+#
+# Copyright 2006, 2007 Free Software Foundation, Inc.
+# 
+# This file is part of GNU Radio
+# 
+# GNU Radio is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3, or (at your option)
+# any later version.
+# 
+# GNU Radio is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with GNU Radio; see the file COPYING.  If not, write to
+# the Free Software Foundation, Inc., 51 Franklin Street,
+# Boston, MA 02110-1301, USA.
+# 
+
+from gnuradio import gr, blks2
+from gnuradio import usrp
+from gnuradio import eng_notation
+from gnuradio.eng_option import eng_option
+from optparse import OptionParser
+from  alsaaudio import * 
+import struct, sys
+import time
+# from current dir
+import usrp_receive_path
+from multiprocessing import Process ,Value
+
+
+
+
+
+class my_top_block(gr.top_block):
+	def __init__(self, callback, options):
+		gr.top_block.__init__(self)
+	
+		self.rxpath = usrp_receive_path.usrp_receive_path(callback, options) 
+		self.connect(self.rxpath)
+class sound_rcv(gr.top_block):
+         def __init__(self):
+	    gr.top_block.__init__(self)
+            self.sample_rate=8000
+	    self.sound_sink=PCM(type=PCM_PLAYBACK,mode=PCM_NORMAL,card='default')
+	    self.sound_sink.setrate(self.sample_rate)
+	    self.sound_sink.setperiodsize(32)
+	    self.sound_sink.setformat(PCM_FORMAT_FLOAT_LE)
+	    self.sound_sink.setchannels(1)
+	    #self.vec_source=gr.file_source_f(self.data,0)
+            #self.sound_sink=audio.sink (sample_rate,"hw:0,0")
+            #self.connect(vec_source,sound_sink)
+         
+         def send_data(self,cdata):
+              for i in range(0,len(cdata)): 
+		self.data.append(cdata[i]) 
+          
+
+
+def main_loop(sound_obj,count):
+  
+	global n_rcvd, n_right ,data
+	n_rcvd = 0
+	n_right = 0
+        data=""
+        
+	global packet_file
+	packet_file = open('/usr/local/share/gnuradio/examples/audio/sound','a')
+	def rx_callback(ok, payload):
+		global n_rcvd, n_right
+		global data
+		 
+		n_rcvd += 1
+		(pktno,) = struct.unpack('!H', payload[0:2])
+		
+		if ok:
+		 n_right += 1
+	         packet_file.write(payload[2:])
+	        #
+	        #if pktno > 19:
+		  #print "writing to file\n"	
+		
+                 #if (len(data)<256000):  
+                    
+                    #data=data+payload[2:]
+                 #else:  
+                    #data_buff=data[256000:]
+                    #print "length of payload",len(payload)
+                    #sound_obj.sound_sink.write(data)
+                print "ok: %r \t pktno: %d \t n_rcvd: %d \t n_right: %d" % (ok, pktno, n_rcvd, n_right)
+	parser = OptionParser(option_class=eng_option, conflict_handler="resolve")
+	expert_grp = parser.add_option_group("Expert")
+	parser.add_option("", "--snr", type="eng_float", default=30, help="set the SNR of the channel in dB [default=%default]")
+
+	usrp_receive_path.add_options(parser, expert_grp)
+	blks2.ofdm_demod.add_options(parser, expert_grp)
+
+	(options, args) = parser.parse_args ()
+
+	if len(args) != 0:
+		parser.print_help(sys.stderr)
+		sys.exit(1)
+
+	if options.rx_freq is None:
+		sys.stderr.write("You must specify -f FREQ or --freq FREQ\n")
+		parser.print_help(sys.stderr)
+		sys.exit(1)
+		
+        global tb 
+	tb = my_top_block(rx_callback, options)
+	global p
+	                  
+        print "options.freq=",options.rx_freq
+        
+	r = gr.enable_realtime_scheduling()
+	if r != gr.RT_OK:
+		print "Warning: failed to enable realtime scheduling"
+
+	tb.start()                      # start flow graph
+	tb.wait()                       # wait for it to finish
+	
+        
+
+if __name__ == '__main__':
+	try:
+              sound_obj=sound_rcv()
+             
+              count=Value('i',1)
+              
+              main_loop(sound_obj,count)
+             
+              
+	except KeyboardInterrupt:
+		packet_file.close()
+		pass

@@ -1,0 +1,131 @@
+# -*- coding: utf-8 -*-
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from gnuradio import gr, blks2
+from gnuradio import window,audio
+from gnuradio import eng_notation
+from gnuradio.eng_option import eng_option
+from optparse import OptionParser
+import string
+import os
+import time, struct
+from multiprocessing import Process ,Value
+import matplotlib as m
+import matplotlib.pyplot as plt
+import math
+global carrier_str_list
+carrier_str_list=[]
+
+class DATA():  ###this class will be used to read the values continuosly into channel_str_list
+      def __init__(self,read_val,fftlength):
+             self.read_carrier=Read_bit_string(fftlength)
+             self.read=read_val
+ 
+      def read_dat(self):
+	while(self.read.value):
+	  print "reading data"
+	  global carrier_str_list
+	  [carrier_map,time]=self.read_carrier.read() 
+	  carrier_str_list.append([carrier_map,time])
+	    
+      def discard_data():
+	global carrier_str_list
+	carrier_str_list=[]
+	  
+class Read_bit_string():
+        def __init__(self,fftlength):
+	    self.fd1=os.open('fifo',os.O_RDONLY)
+	    self.fd2=os.open('Time_fifo',os.O_RDONLY)
+	 
+	def read(self):
+	       carrier_str=os.read(fd1,fft_length)
+	       time=os.read(fd2,10)
+	       time=float(time)
+	       return carrier_str,time
+	 
+	 #def stop_read(): #to be complited later for closing fifo file.
+	     
+
+def find_channels(minimum_bandwidth_req,bin_size,fft_length):
+         min_numof_zeros=(minimum_bandwidth_req/bin_size)
+         print "min_numof_zeros",min_numof_zeros
+         potential_channel_list=[]
+         string_potential_channels=""
+         n=0
+         req_bit_pattern=[0]*min_numof_zeros
+         count=0
+         read_carrier=Read_bit_string(fft_length)
+         
+         time_list=[]
+         channel_list=[]
+        
+         for i in range(400):
+	   global carrier_str_list
+	   carrier_str=carrier_str_list[i][0]
+	   while (n<= len(carrier_str)-(min_numof_zeros)):
+		    index=carrier_str.find(req_bit_pattern,n)
+		    if (index!=-1) and (str(index) not in potential_channel_list):
+			potential_channel_list.append(str(index))
+			string_potential_channels=string_potential_channels+str(index)
+		    n=n+index
+	
+	 if ((len(string_potential_channels)/len(potential_channel_list))>=160): #160=40 % of 400 ie there shoul be at least holes 40% of the time
+	       print "found channels\n"
+	       for channel in potential_channels_list:
+		   count =string_potential_channels.count()
+		   if (count>=160):
+		     channel_list.append(channel)
+	       print "channels found",channel_list
+	       return  channel_list
+	 else:  
+	  print "no channels found\n changing band"
+	  # send info to the sensor program using pipe to switch to next freq.
+	  return -1
+	
+
+def create_channel_state_graph(channel_number,min_numof_zeros,stop_graph):
+	  global carrier_str_list
+	  channel_graph=[]
+	  offset=channel_number+min_numof_zeros
+	  for carrier_str in carrier_str_list:
+	      if carrier_str[0][channel_number:offset].count('0')<(min_numof_zeros-1):
+		 channel_graph.append([0,carrier_str[1]])
+	      else:
+                 channel_graph.append([1,carrier_str[1]])	
+              if (stop_graph.value):
+		 bit_stream=[]
+		 time_stream=[]
+		 for i in channel_graph:
+		      bit_stream.append(i[0])
+		      time_stream.append(i[1])
+		      plt.plot(bit_stream,time_stream)
+		 break
+		 
+	  
+	
+	       
+	     
+if __name__ == '__main__':
+	try:
+		read=Value('i',1)
+		stop_graph=Value('i',0)
+		decimation=64 #hardcoded for now
+		fft_length=256 #hardcoded for now
+		bin_size=(100*10**6/(16*256))
+		print "bin_size",bin_size
+		minimum_bandwidth_req=230*10**3 #230 KHZ
+		data=DATA(read,fft_length)
+		p1=Process(target=data.read_dat,args=())
+		p1.start()
+		time.sleep(30)
+		channel_list=find_channels(minimum_bandwidth_req,bin_size,fft_length)
+		min_numof_zeros=ceil(minimum_bandwidth_req/bin_size)
+		p2=Process(target=create_channel_state_graph,args=(channel_list(0),min_numof_zeros,stop_graph))  
+		p2.start()
+		time.sleep(5000)
+		read.value=0
+		stop_graph.value=1
+		
+	except KeyboardInterrupt:
+		pass	
